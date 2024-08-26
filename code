@@ -1,0 +1,73 @@
+from sparkai.llm.llm import ChatSparkLLM, ChunkPrintHandler
+from sparkai.core.messages import ChatMessage
+from langchain_community.tools import DuckDuckGoSearchRun
+import json
+
+# ...（星火大模型配置保持不变）...
+
+# 初始化星火大模型和 DuckDuckGo 搜索
+spark = ChatSparkLLM(
+    spark_api_url=SPARKAI_URL,
+    spark_app_id=SPARKAI_APP_ID,
+    spark_api_key=SPARKAI_API_KEY,
+    spark_api_secret=SPARKAI_API_SECRET,
+    spark_llm_domain=SPARKAI_DOMAIN,
+    streaming=False,
+)
+search = DuckDuckGoSearchRun()
+
+def ai_search(query):
+    """
+    使用星火大模型理解用户查询，使用 DuckDuckGo 搜索，
+    并用星火大模型将结果转换为对话风格的回答。
+    """
+    print("步骤 1：理解用户查询...")
+    # 让星火大模型理解用户的搜索意图
+    messages = [ChatMessage(role="user", content=f"帮我用 DuckDuckGo 搜索以下内容: {query}")]
+    handler = ChunkPrintHandler()
+    response = spark.generate([messages], callbacks=[handler])
+    search_query = response.generations[0][0].text
+    print(f"  - 星火理解后的搜索关键词: {search_query}")
+
+    print("步骤 2：使用 DuckDuckGo 搜索...")
+    # 使用 DuckDuckGo 搜索
+    try:
+        response = requests.get(f"https://api.duckduckgo.com/?q={search_query}&format=json")
+        response.raise_for_status()  # 检查请求是否成功
+        search_results = response.json()
+        time.sleep(1)  # 添加 1 秒延迟
+    except requests.exceptions.RequestException as e:
+        print(f"  - DuckDuckGo 搜索出错: {e}")
+        return "抱歉，我无法获取搜索结果，请稍后再试。"
+    print("  - 搜索完成")
+
+    print("步骤 3：使用星火大模型整理搜索结果...")
+    # 将搜索结果的 result 部分发送给星火大模型进行整理
+    result_text = search_results.get("Abstract", "")  # 获取 Abstract 部分
+    messages = [
+        ChatMessage(role="user", content=f"请你整理以下 DuckDuckGo 搜索结果的 Abstract 部分，使其更易读：\n{result_text}")
+    ]
+    handler = ChunkPrintHandler()
+    response = spark.generate([messages], callbacks=[handler])
+    organized_result = response.generations[0][0].text
+    print("  - 整理完成")
+
+    print("步骤 4：使用星火大模型生成最终答案...")
+    # 让星火大模型根据整理后的结果回答用户的问题
+    messages = [
+        ChatMessage(role="user", content=f"根据以下信息，简洁地回答我的问题：\n{organized_result}\n\n问题：{query}")
+    ]
+    handler = ChunkPrintHandler()
+    response = spark.generate([messages], callbacks=[handler])
+    answer = response.generations[0][0].text
+    print("  - 答案生成完成")
+    return answer
+
+if __name__ == '__main__':
+    while True:
+        user_input = input("你：")
+        if user_input.lower() == "停止":
+            break
+
+        answer = ai_search(user_input)
+        print("星火：", answer)
